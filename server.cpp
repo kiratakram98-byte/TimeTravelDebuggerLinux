@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 #include <cstdint>
 #include <cstdio>
+#include <stdexcept>
 using namespace std;
 
 // ---- Constants ----
@@ -45,29 +46,63 @@ class Stack
 public:
     // Implement these functions:
     Stack()
-    { // initialize the stack
+    {
+        top = nullptr;
+        count = 0;
     }
     void push(const T& val)
     {
-
+        if (count >= MAX_STACK_DEPTH) {
+            return;
+        }
+        Node* n = new Node;
+        n->next = top;
+        n->data = val;
+        top = n;
+        count++;
         // pushes the value on the stack if max limit is not reached yet.
     }
     T pop()
     {
+        if (top == nullptr) {
+            throw runtime_error("Stack is empty");
+        }
+        Node* n = top;
+        T val = n->data;
+        top = top->next;
+        delete n;
+        count--;
+        return val;
+
+
         // pop the top value on the stack
     }
     T& peek()
     {
+        return top->data;
         // returns the top value on the stack
     }
     bool isEmpty()
     {
+        if (top == nullptr) {
+            return true;
+        }
+        return false;
     }
     int32_t depth()
     {
+        return count;
     }
     int32_t snapshot_into(T out[], int32_t maxLen)
     {
+        Node* n = top;
+        int32_t i = 0;
+        while (n != nullptr && i < maxLen) {
+            out[i] = n->data;
+            n = n->next;
+            i++;
+        }
+        return i;
         // copies every frame, top to bottom in the array given as a parameter
         // this is what buildSnapshot() call, returns count written
     }
@@ -91,16 +126,34 @@ public:
     // Implement these functions
     Timeline()
     {
+        head = nullptr;
+        tail = nullptr;
+        stepCount = 0;
     }
     void record(Snapshot* s)
     {
+        TimelineNode* n = new TimelineNode;
+        n->data = s;
+        n->next = nullptr;
+        n->prev = tail;
+        if (tail == nullptr) {
+            head = n;
+            tail = n;
+        }
+        else {
+            tail->next = n;
+            tail = n;
+        }
+        stepCount++;
         // add record in the timeline
     }
     TimelineNode* begin()
     {
+        return head;
     }
     int32_t getStepCount()
     {
+        return stepCount;
     }
 };
 
@@ -156,18 +209,71 @@ struct PendingPatch
 // PASS 0x0: READING source.bin + VALIDITY CHECK
 bool readSourceLine(ifstream& in, string& out)
 {
+    while (getline(in, out)) {
+        if (!out.empty()) {
+            return true;
+
+        }
+    }
+    return false;
     // reads the next nonblank line
 }
 string firstWord(const string& line)
 {
+    size_t idx = line.find(' ');
+    if (idx == string::npos) {
+        return line;
+    }
+    return line.substr(0, idx);
     // returns first word from the input string
 }
 string secondWord(const string& line)
 {
-    // returns the second word
+    size_t idx1 = line.find(' ');
+    if (idx1 == string::npos) {
+        return "";
+    }
+    size_t idx2 = line.find(' ', idx1 + 1);
+    if (idx2 == string::npos) {
+        return line.substr(idx1 + 1);
+    }
+    return line.substr(idx1 + 1, idx2 - idx1 - 1);
+
+
+
 }
 bool validateProgram(const char* sourcePath)
 {
+    ifstream fin;
+    fin.open(sourcePath, ios::binary);
+    if (!fin) {
+        return false;
+    }
+    string line;
+    Stack<string> validity_stack;
+
+
+    while (readSourceLine(fin, line)) {
+        string word1 = firstWord(line);
+        if (word1 == "func") {
+            if (!validity_stack.isEmpty()) {
+                return false;
+
+            }
+            string word2 = secondWord(line);
+            validity_stack.push(word2);
+        }
+        else if (word1 == "func_end") {
+            if (validity_stack.isEmpty()) {
+                return false;
+            }
+            validity_stack.pop();
+        }
+    }
+    if (!validity_stack.isEmpty()) {
+        return false;
+    }
+    return true;
     // for each func defined there should be exactly one func_end and no nested funcs allowed - 
 }
 
