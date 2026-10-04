@@ -9,3 +9,6 @@
 
 #3 oct
 implemented phase 01 as much as i could dont know whether its correct or not will check tomorrow
+
+#4 oct
+implemented buildsnapshot and tokenizeline and tried to understand execute program, will not be doing tomorrow already so much work ,swill try to do on tuesday but not sure
