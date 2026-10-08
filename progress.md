@@ -12,3 +12,10 @@ implemented phase 01 as much as i could dont know whether its correct or not wil
 
 #4 oct
 implemented buildsnapshot and tokenizeline and tried to understand execute program, will not be doing tomorrow already so much work ,swill try to do on tuesday but not sure
+
+#7 oct
+implemented half of execute program
+
+#8 oct
+forgot to commit yesterday 
+completed execute program

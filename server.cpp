@@ -14,7 +14,6 @@
 #include <fstream>
 #include <unistd.h>
 #include <sys/socket.h>
-#include <cstdint>
 #include <cstdio>
 #include <stdexcept>
 using namespace std;
@@ -172,6 +171,11 @@ struct Frame
     Variable locals[MAX_VARS_PER_FRAME];
     int32_t localCount;
 };
+struct CallInfo
+{
+    int64_t returnOffset;
+    string argSource[MAX_VARS_PER_FRAME];
+};
 struct Snapshot
 {
     Frame callStack[MAX_STACK_DEPTH];
@@ -297,7 +301,7 @@ int64_t readResolveRecord(FILE* f, string& outText)
     char* temp = new char[stringSize];
     fread(temp, 1, stringSize, f);
     outText.assign(temp, stringSize);//using assign bcz our temp doesnt have null terminator
-    delete temp;
+    delete[] temp;
     return offsetField;
     // reads one record at the current position and advances past it, returns the offset field - the raw line text comes back untouched in outText.
 }
@@ -318,7 +322,7 @@ int64_t resolveProgram(const char* sourcePath, const char* resolveBinPath)
     if (fout == nullptr) {
         return -1;
     }
-    int64_t currentOffset = 0;
+    int64_t currentOffset = 0;//of resolvebin
     string line;
     int64_t mainOffset = -1;
     while (readSourceLine(fin, line)) {
@@ -399,18 +403,19 @@ int32_t tokenizeLine(const string& line, Token tokens[], int32_t maxTokens)
     if (token_count < maxTokens) {
 
         tokens[token_count].text = firstWord(line);
-        tokens[token_count].text = KEYWORD;
-        token_count++;
-    }
-    if (token_count < maxTokens) {
-        tokens[token_count].text = secondWord(line);
-        tokens[token_count].text = IDENTIFIER;
+        tokens[token_count].type = KEYWORD;
         token_count++;
     }
     size_t firstSpace = line.find(' ');
-    if (firstSpace == string::npos){
+    if (firstSpace == string::npos) {
         return token_count;
     }
+    if (token_count < maxTokens) {
+        tokens[token_count].text = secondWord(line);
+        tokens[token_count].type = IDENTIFIER;
+        token_count++;
+    }
+   
     size_t secondSpace = line.find(' ', firstSpace + 1);
     if (secondSpace == string::npos) {
         return token_count;
@@ -439,14 +444,172 @@ Snapshot* buildSnapshot(Stack<Frame>& callStack)
     return snapshot;
     // build the snapshot based on the callStack given
 }
+Variable* findVariable(Frame& frame, const string& name) {
+    for (int32_t i = 0; i < frame.argc; i++) {
+        if (frame.argv[i].name == name) {
+            return &frame.argv[i];
+        }
+    }
+    for (int32_t i = 0; i < frame.localCount; i++) {
+        if (frame.locals[i].name == name) {
+            return &frame.locals[i];
+        }
+    }
+    return nullptr;
+}
 void executeProgram(const char* resolveBinPath, int64_t mainOffset, Timeline& timeline)
 {
+    FILE* fin = fopen(resolveBinPath, "rb");
+    if (fin == nullptr) {
+        return;
+    }
+    Stack<Frame> callStack;
+    Stack<CallInfo> callinfo;
+    Frame main_frame;
+    main_frame.func_name = "main";
+    main_frame.argc = 0;
+    main_frame.returnLine = -1;
+    main_frame.localCount = 0;
+    callStack.push(main_frame);
+    CallInfo main_info;
+    main_info.returnOffset = -1;
+    callinfo.push(main_info);
+    fseek(fin, mainOffset, SEEK_SET);
+    while (!callStack.isEmpty()) {
+        int64_t currentOffset = ftell(fin);
+        string line;
+        int64_t targetOffset = readResolveRecord(fin, line);
+        int64_t nextOffset = ftell(fin);
+        Token tokens[MAX_TOKENS];
+        int32_t tokenCount = tokenizeLine(line, tokens, MAX_TOKENS);
+        if (tokenCount == 0) {
+            break;
+        }
+        Frame& currentFrame = callStack.peek();
+        if (tokens[0].text == "func") {
+
+        }
+        else if (tokens[0].text == "set") {
+            string var_name = tokens[1].text;
+            int32_t value = stoi(tokens[2].text);
+            Variable* variable = findVariable(currentFrame, var_name);
+            if (variable != nullptr) {
+                variable->value = value;
+            }
+            else if (currentFrame.localCount < MAX_VARS_PER_FRAME) {
+                currentFrame.locals[currentFrame.localCount].name = var_name;
+                currentFrame.locals[currentFrame.localCount].value = value;
+                currentFrame.localCount++;
+            }
+        }
+        else if (tokens[0].text == "add") {
+            string a = tokens[1].text;
+            string b = tokens[2].text;
+            Variable* a1 = findVariable(currentFrame, a);
+            Variable* b1 = findVariable(currentFrame, b);
+            if (a1 != nullptr && b1 != nullptr) {
+                a1->value = a1->value + b1->value;
+            }
+
+        }
+        else if (tokens[0].text == "sub") {
+            string a = tokens[1].text;
+            string b = tokens[2].text;
+            Variable* a1 = findVariable(currentFrame, a);
+            Variable* b1 = findVariable(currentFrame, b);
+            if (a1 != nullptr && b1 != nullptr) {
+                a1->value = a1->value - b1->value;
+            }
+
+        }
+        else if (tokens[0].text == "mul") {
+            string a = tokens[1].text;
+            string b = tokens[2].text;
+            Variable* a1 = findVariable(currentFrame, a);
+            Variable* b1 = findVariable(currentFrame, b);
+            if (a1 != nullptr && b1 != nullptr) {
+                a1->value = a1->value * b1->value;
+            }
+
+        }
+        else if (tokens[0].text == "div") {
+            string a = tokens[1].text;
+            string b = tokens[2].text;
+            Variable* a1 = findVariable(currentFrame, a);
+            Variable* b1 = findVariable(currentFrame, b);
+            if (a1 != nullptr && b1 != nullptr) {
+                a1->value = a1->value / b1->value;
+            }
+
+        }
+        
+        else if (tokens[0].text == "call") {
+            int64_t returnOffset = nextOffset;
+            fseek(fin, targetOffset, SEEK_SET);
+            string funcline;
+            readResolveRecord(fin, funcline);
+            Token func_tokens[MAX_TOKENS];
+            int32_t funcTokenCount = tokenizeLine(funcline, func_tokens, MAX_TOKENS);
+            Frame new_frame;
+            new_frame.func_name = func_tokens[1].text;
+            new_frame.argc = 0;
+            new_frame.returnLine = returnOffset;
+            new_frame.localCount = 0;
+            CallInfo newinfo;
+            newinfo.returnOffset = returnOffset;
+            for (int32_t i = 2; i < funcTokenCount && new_frame.argc < MAX_VARS_PER_FRAME; i++) {
+                int32_t argIndex = i;
+                if (argIndex >= tokenCount) {
+                    break;
+                }
+                string paraName = func_tokens[i].text;
+                string argName = tokens[argIndex].text;
+                new_frame.argv[new_frame.argc].name = paraName;
+                newinfo.argSource[new_frame.argc] = argName;
+
+                Variable* argument = findVariable(currentFrame, argName);
+                if (argument != nullptr) {
+                    new_frame.argv[new_frame.argc].value = argument->value;
+                }
+                else {
+
+                    new_frame.argv[new_frame.argc].value = 0;
+                }
+                new_frame.argc++;
+            }
+            callStack.push(new_frame);
+            callinfo.push(newinfo);
+        }
+        else if (tokens[0].text == "func_end") {
+            Frame finishedFrame = callStack.pop();
+            CallInfo finishedInfo = callinfo.pop();
+            if (!callStack.isEmpty()) {
+                Frame& callerFrame = callStack.peek();
+                for (int32_t i = 0; i < finishedFrame.argc; i++) {
+                    string sourceName = finishedInfo.argSource[i];
+                    Variable* callerVariable = findVariable(callerFrame, sourceName);
+                    if (callerVariable != nullptr) {
+                        callerVariable->value = finishedFrame.argv[i].value;
+                    }
+                }
+            }
+            fseek(fin, finishedInfo.returnOffset, SEEK_SET);
+        }
+        Snapshot* snapshot = buildSnapshot(callStack);
+        timeline.record(snapshot);
+        fseek(fin, nextOffset, SEEK_SET);
+    }
+
+    fclose(fin);
+
+
     // initialize the call stack
     // make the main frame
     // push main frame on the call stack
 
     // implementation:
     // execute line by line, and according to the keyword perform action
+
 }
 
 // PASS 0x3: SERIALIZE TIMELINE
@@ -469,7 +632,9 @@ int32_t main()
     }
 
     int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
-
+    if (mainOffset == -1) {
+        return 1;
+    }
     Timeline timeline;
     executeProgram("resolve.bin", mainOffset, timeline);
 
