@@ -19,3 +19,6 @@ implemented half of execute program
 #8 oct
 forgot to commit yesterday 
 completed execute program
+
+#9 oct
+implemented phase03 havent checked if its correct or not 

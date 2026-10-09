@@ -192,6 +192,8 @@ void writeHeader(FILE* f, const TTDBHeader& h)
 {
     fwrite(h.magic, 1, 4, f);
     fwrite(&h.version, sizeof(int32_t), 1, f);
+    fwrite(&h.stepCount, sizeof(int32_t), 1, f);
+    fwrite(&h.indexOffset, sizeof(int64_t), 1, f);
 
     // placeholder for other two data members
 }
@@ -613,8 +615,127 @@ void executeProgram(const char* resolveBinPath, int64_t mainOffset, Timeline& ti
 }
 
 // PASS 0x3: SERIALIZE TIMELINE
+bool write_string(FILE* f, const string& text) {
+    int32_t length = static_cast<int32_t>(text.size());
+    if (fwrite(&length, sizeof(int32_t), 1, f) != 1){
+        return false;
+    }
+    if (length > 0){
+        if (fwrite(text.data(), 1, length, f) != static_cast<size_t>(length)){
+            return false;
+        }
+    }
+    return true;
+
+}
+bool write_variable(FILE* f, const Variable& variable){
+    if (!write_string(f, variable.name)){    
+        return false;
+    }
+
+    if (fwrite(&variable.value, sizeof(int32_t), 1, f) != 1) {
+        return false;
+    }
+
+    return true;
+}
+bool write_frame(FILE* f, const Frame& frame) {
+    if (frame.argc < 0 || frame.argc > MAX_VARS_PER_FRAME) {
+        return false;
+    }
+
+    if (frame.localCount < 0 || frame.localCount > MAX_VARS_PER_FRAME) {
+        return false;
+    }
+    if (!write_string(f, frame.func_name)){
+        return false;
+    }
+    if (fwrite(&frame.argc, sizeof(int32_t), 1, f) != 1){
+        return false;
+    }
+    for (int32_t i = 0; i < frame.argc; i++){
+        if (!write_variable(f, frame.argv[i])){
+            return false;
+        }
+    }
+    if (fwrite(&frame.returnLine, sizeof(int32_t), 1, f) != 1){
+        return false;
+    }
+
+    if (fwrite(&frame.localCount, sizeof(int32_t), 1, f) != 1){
+        return false;
+    }
+
+    for (int32_t i = 0; i < frame.localCount; i++){
+        if (!write_variable(f, frame.locals[i])){
+            return false;
+        }
+    }
+
+    return true;
+}
+bool writeSnapshot(FILE* f, const Snapshot& snapshot){
+    if (snapshot.stackDepth < 0 || snapshot.stackDepth > MAX_STACK_DEPTH){
+        return false;
+    }
+
+    if (fwrite(&snapshot.stackDepth, sizeof(int32_t), 1, f) != 1){
+        return false;
+    }
+    for (int32_t i = 0; i < snapshot.stackDepth; i++){
+        if (!write_frame(f, snapshot.callStack[i])){
+            return false;
+        }
+    }
+    return true;
+
+
+}
+
 void writeTdbg(Timeline& timeline, const char* tdbgPath)
 {
+    FILE* fout = fopen(tdbgPath, "wb+");
+    if (fout == nullptr) {
+        return;
+    }
+    TTDBHeader header;
+    header.magic[0] = 'T';
+    header.magic[1] = 'T';
+    header.magic[2] = 'D';
+    header.magic[3] = 'B';
+    header.version = 1;
+    header.stepCount = timeline.getStepCount();
+    header.indexOffset = 0;
+    writeHeader(fout, header);
+    int32_t snapshot_count = timeline.getStepCount();
+    int* idx = new int[snapshot_count];
+    TimelineNode* first_snap = timeline.begin();
+    for (int i = 0; i < snapshot_count; i++) {
+        int a = ftell(fout);
+        if (a == -1 ) {
+            fclose(fout);
+            return;
+        }
+        idx[i] = a;
+        if (!writeSnapshot(fout, *first_snap->data)) {
+            delete[] idx;
+            fclose(fout);
+            return;
+        }
+        first_snap = first_snap->next;
+    }
+    header.indexOffset = ftell(fout);
+    for (int i = 0; i < snapshot_count; i++) {
+        if (fwrite(&idx[i], sizeof(int64_t), 1, fout) != 1) {
+            delete[] idx;
+            fclose(fout);
+            return;
+        }
+    }
+    fseek(fout, 0, SEEK_SET);
+    writeHeader(fout, header);
+    delete[] idx;
+    fclose(fout);
     // placeholder for header
     // index array of the size of stepcount from the timeline
     // placing each snapshot in the file while maintaining the index(starting point of each nth snapshot)
