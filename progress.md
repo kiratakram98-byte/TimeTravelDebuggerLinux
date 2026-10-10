@@ -22,3 +22,8 @@ completed execute program
 
 #9 oct
 implemented phase03 havent checked if its correct or not 
+
+#10 oct 
+changed writeheader return type to bool
+changes returnline type and some more changes in code 
+tested my code with arithmetic operations,two function parameters,separate local variables,correct return position,invalid program handling(missing func_end,nested func,unmatched func_end)

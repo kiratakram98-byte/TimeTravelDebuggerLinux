@@ -1,0 +1,3 @@
+/mnt/c/Users/HP/source/repos/TimeTravelDebuggerLinux/build/CMakeFiles/TimeTravelDebuggerLinux.dir
+/mnt/c/Users/HP/source/repos/TimeTravelDebuggerLinux/build/CMakeFiles/edit_cache.dir
+/mnt/c/Users/HP/source/repos/TimeTravelDebuggerLinux/build/CMakeFiles/rebuild_cache.dir

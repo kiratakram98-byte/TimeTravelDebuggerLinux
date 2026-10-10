@@ -49,16 +49,17 @@ public:
         top = nullptr;
         count = 0;
     }
-    void push(const T& val)
+    bool push(const T& val)
     {
         if (count >= MAX_STACK_DEPTH) {
-            return;
+            return false;
         }
         Node* n = new Node;
         n->next = top;
         n->data = val;
         top = n;
         count++;
+        return true;
         // pushes the value on the stack if max limit is not reached yet.
     }
     T pop()
@@ -167,7 +168,7 @@ struct Frame
     string func_name;
     int32_t argc;
     Variable argv[MAX_VARS_PER_FRAME];
-    int32_t returnLine;
+    int64_t returnLine;
     Variable locals[MAX_VARS_PER_FRAME];
     int32_t localCount;
 };
@@ -188,13 +189,21 @@ struct TTDBHeader
     int32_t stepCount;
     int64_t indexOffset;
 };
-void writeHeader(FILE* f, const TTDBHeader& h)
+bool writeHeader(FILE* f, const TTDBHeader& h)
 {
-    fwrite(h.magic, 1, 4, f);
-    fwrite(&h.version, sizeof(int32_t), 1, f);
-    fwrite(&h.stepCount, sizeof(int32_t), 1, f);
-    fwrite(&h.indexOffset, sizeof(int64_t), 1, f);
-
+    if (fwrite(h.magic, 1, 4, f) != 4) {
+        return false;
+    }
+    if(fwrite(&h.version, sizeof(int32_t), 1, f) != 1) {
+        return false;
+    }
+    if(fwrite(&h.stepCount, sizeof(int32_t), 1, f) != 1) {
+        return false;
+    }
+    if(fwrite(&h.indexOffset, sizeof(int64_t), 1, f) != 1) {
+        return false;
+    }
+    return true;
     // placeholder for other two data members
 }
 
@@ -488,6 +497,7 @@ void executeProgram(const char* resolveBinPath, int64_t mainOffset, Timeline& ti
             break;
         }
         Frame& currentFrame = callStack.peek();
+        bool flag = false;
         if (tokens[0].text == "func") {
 
         }
@@ -579,8 +589,15 @@ void executeProgram(const char* resolveBinPath, int64_t mainOffset, Timeline& ti
                 }
                 new_frame.argc++;
             }
-            callStack.push(new_frame);
-            callinfo.push(newinfo);
+
+            if (callStack.push(new_frame)) {
+                callinfo.push(newinfo);
+                flag = true;
+            }
+
+            else {
+                break;
+            }
         }
         else if (tokens[0].text == "func_end") {
             Frame finishedFrame = callStack.pop();
@@ -596,10 +613,13 @@ void executeProgram(const char* resolveBinPath, int64_t mainOffset, Timeline& ti
                 }
             }
             fseek(fin, finishedInfo.returnOffset, SEEK_SET);
+            flag = true;
         }
         Snapshot* snapshot = buildSnapshot(callStack);
         timeline.record(snapshot);
-        fseek(fin, nextOffset, SEEK_SET);
+        if (!flag) {
+            fseek(fin, nextOffset, SEEK_SET);
+        }
     }
 
     fclose(fin);
@@ -658,7 +678,7 @@ bool write_frame(FILE* f, const Frame& frame) {
             return false;
         }
     }
-    if (fwrite(&frame.returnLine, sizeof(int32_t), 1, f) != 1){
+    if (fwrite(&frame.returnLine, sizeof(int64_t), 1, f) != 1){
         return false;
     }
 
@@ -706,17 +726,21 @@ void writeTdbg(Timeline& timeline, const char* tdbgPath)
     header.version = 1;
     header.stepCount = timeline.getStepCount();
     header.indexOffset = 0;
-    writeHeader(fout, header);
+    if (!writeHeader(fout, header)) {
+        fclose(fout);
+        return;
+    }
     int32_t snapshot_count = timeline.getStepCount();
-    int* idx = new int[snapshot_count];
+    int64_t* idx = new int64_t[snapshot_count];
     TimelineNode* first_snap = timeline.begin();
     for (int i = 0; i < snapshot_count; i++) {
-        int a = ftell(fout);
-        if (a == -1 ) {
+        long a = ftell(fout);
+        if (a == -1) {
+            delete[] idx;
             fclose(fout);
             return;
         }
-        idx[i] = a;
+        idx[i] = static_cast<int64_t>(a);
         if (!writeSnapshot(fout, *first_snap->data)) {
             delete[] idx;
             fclose(fout);
@@ -724,7 +748,13 @@ void writeTdbg(Timeline& timeline, const char* tdbgPath)
         }
         first_snap = first_snap->next;
     }
-    header.indexOffset = ftell(fout);
+    long idx_pos = ftell(fout);
+    if (idx_pos == -1) {
+        delete[] idx;
+        fclose(fout);
+        return;
+    }
+    header.indexOffset = static_cast<int64_t>(idx_pos);
     for (int i = 0; i < snapshot_count; i++) {
         if (fwrite(&idx[i], sizeof(int64_t), 1, fout) != 1) {
             delete[] idx;
@@ -732,10 +762,20 @@ void writeTdbg(Timeline& timeline, const char* tdbgPath)
             return;
         }
     }
-    fseek(fout, 0, SEEK_SET);
-    writeHeader(fout, header);
-    delete[] idx;
+    if (fseek(fout, 0, SEEK_SET) != 0) {
+        delete[] idx;
+        fclose(fout);
+        return;
+    }
+
+    if (!writeHeader(fout, header)) {
+        delete[] idx;
+        fclose(fout);
+        return;
+    }
+   
     fclose(fout);
+    return;
     // placeholder for header
     // index array of the size of stepcount from the timeline
     // placing each snapshot in the file while maintaining the index(starting point of each nth snapshot)
