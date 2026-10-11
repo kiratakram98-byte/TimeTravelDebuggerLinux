@@ -1,3 +1,7 @@
 func main
 set x 5
+call square x
+func_end
+func square a
+mul a a
 func_end

@@ -27,3 +27,7 @@ implemented phase03 havent checked if its correct or not
 changed writeheader return type to bool
 changes returnline type and some more changes in code 
 tested my code with arithmetic operations,two function parameters,separate local variables,correct return position,invalid program handling(missing func_end,nested func,unmatched func_end)
+
+#11 oct
+changed add/mul/sub/div so now they support add a b c and add a 6 
+ran more test

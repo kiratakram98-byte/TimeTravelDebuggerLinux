@@ -468,6 +468,28 @@ Variable* findVariable(Frame& frame, const string& name) {
     }
     return nullptr;
 }
+
+bool getOperandValue(Frame& frame, const string& operand, int32_t& value)
+{
+    Variable* variable = findVariable(frame, operand);
+    if (variable != nullptr) {
+        value = variable->value;
+        return true;
+    }
+    try {
+        size_t used = 0;
+        int32_t number = stoi(operand, &used);
+        if (used != operand.size()) {
+            return false;
+        }
+        value = number;
+        return true;
+    }
+    catch (...) {
+        return false;
+    }
+}
+
 void executeProgram(const char* resolveBinPath, int64_t mainOffset, Timeline& timeline)
 {
     FILE* fin = fopen(resolveBinPath, "rb");
@@ -515,46 +537,69 @@ void executeProgram(const char* resolveBinPath, int64_t mainOffset, Timeline& ti
             }
         }
         else if (tokens[0].text == "add") {
-            string a = tokens[1].text;
-            string b = tokens[2].text;
-            Variable* a1 = findVariable(currentFrame, a);
-            Variable* b1 = findVariable(currentFrame, b);
-            if (a1 != nullptr && b1 != nullptr) {
-                a1->value = a1->value + b1->value;
-            }
+            if (tokenCount >= 3) {
+                Variable* first = findVariable(currentFrame, tokens[1].text);
 
+                if (first != nullptr) {
+                    for (int32_t i = 2; i < tokenCount; i++) {
+                        int32_t value;
+
+                        if (getOperandValue(currentFrame, tokens[i].text, value)) {
+                            first->value += value;
+                        }
+                    }
+                }
+            }
         }
         else if (tokens[0].text == "sub") {
-            string a = tokens[1].text;
-            string b = tokens[2].text;
-            Variable* a1 = findVariable(currentFrame, a);
-            Variable* b1 = findVariable(currentFrame, b);
-            if (a1 != nullptr && b1 != nullptr) {
-                a1->value = a1->value - b1->value;
-            }
+            if (tokenCount >= 3) {
+                Variable* first = findVariable(currentFrame, tokens[1].text);
 
+                if (first != nullptr) {
+                    for (int32_t i = 2; i < tokenCount; i++) {
+                        int32_t value;
+
+                        if (getOperandValue(currentFrame, tokens[i].text, value)) {
+                            first->value -= value;
+                        }
+                    }
+                }
+            }
         }
         else if (tokens[0].text == "mul") {
-            string a = tokens[1].text;
-            string b = tokens[2].text;
-            Variable* a1 = findVariable(currentFrame, a);
-            Variable* b1 = findVariable(currentFrame, b);
-            if (a1 != nullptr && b1 != nullptr) {
-                a1->value = a1->value * b1->value;
-            }
+            if (tokenCount >= 3) {
+                Variable* first = findVariable(currentFrame, tokens[1].text);
 
+                if (first != nullptr) {
+                    for (int32_t i = 2; i < tokenCount; i++) {
+                        int32_t value;
+
+                        if (getOperandValue(currentFrame, tokens[i].text, value)) {
+                            first->value *= value;
+                        }
+                    }
+                }
+            }
         }
         else if (tokens[0].text == "div") {
-            string a = tokens[1].text;
-            string b = tokens[2].text;
-            Variable* a1 = findVariable(currentFrame, a);
-            Variable* b1 = findVariable(currentFrame, b);
-            if (a1 != nullptr && b1 != nullptr) {
-                a1->value = a1->value / b1->value;
-            }
+            if (tokenCount >= 3) {
+                Variable* first = findVariable(currentFrame, tokens[1].text);
 
+                if (first != nullptr) {
+                    for (int32_t i = 2; i < tokenCount; i++) {
+                        int32_t value;
+
+                        if (getOperandValue(currentFrame, tokens[i].text, value)) {
+                            if (value == 0) {
+                                break;
+                            }
+
+                            first->value /= value;
+                        }
+                    }
+                }
+            }
         }
-        
         else if (tokens[0].text == "call") {
             int64_t returnOffset = nextOffset;
             fseek(fin, targetOffset, SEEK_SET);
