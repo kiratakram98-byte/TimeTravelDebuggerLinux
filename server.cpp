@@ -508,6 +508,7 @@ void executeProgram(const char* resolveBinPath, int64_t mainOffset, Timeline& ti
     main_info.returnOffset = -1;
     callinfo.push(main_info);
     fseek(fin, mainOffset, SEEK_SET);
+    bool done = false;
     while (!callStack.isEmpty()) {
         int64_t currentOffset = ftell(fin);
         string line;
@@ -624,19 +625,15 @@ void executeProgram(const char* resolveBinPath, int64_t mainOffset, Timeline& ti
                 new_frame.argv[new_frame.argc].name = paraName;
                 newinfo.argSource[new_frame.argc] = argName;
 
-                Variable* argument = findVariable(currentFrame, argName);
-                if (argument != nullptr) {
-                    new_frame.argv[new_frame.argc].value = argument->value;
-                }
-                else {
-
-                    new_frame.argv[new_frame.argc].value = 0;
-                }
+                int32_t argValue = 0;
+                getOperandValue(currentFrame, argName, argValue);
+                new_frame.argv[new_frame.argc].value = argValue;
                 new_frame.argc++;
             }
 
             if (callStack.push(new_frame)) {
                 callinfo.push(newinfo);
+                fseek(fin, targetOffset, SEEK_SET);
                 flag = true;
             }
 
@@ -645,27 +642,35 @@ void executeProgram(const char* resolveBinPath, int64_t mainOffset, Timeline& ti
             }
         }
         else if (tokens[0].text == "func_end") {
-            Frame finishedFrame = callStack.pop();
-            CallInfo finishedInfo = callinfo.pop();
-            if (!callStack.isEmpty()) {
-                Frame& callerFrame = callStack.peek();
-                for (int32_t i = 0; i < finishedFrame.argc; i++) {
-                    string sourceName = finishedInfo.argSource[i];
-                    Variable* callerVariable = findVariable(callerFrame, sourceName);
-                    if (callerVariable != nullptr) {
-                        callerVariable->value = finishedFrame.argv[i].value;
+            if (callStack.depth() == 1) {
+                done = true;
+            }
+            else {
+                Frame finishedFrame = callStack.pop();
+                CallInfo finishedInfo = callinfo.pop();
+                if (!callStack.isEmpty()) {
+                    Frame& callerFrame = callStack.peek();
+                    for (int32_t i = 0; i < finishedFrame.argc; i++) {
+                        string sourceName = finishedInfo.argSource[i];
+                        Variable* callerVariable = findVariable(callerFrame, sourceName);
+                        if (callerVariable != nullptr) {
+                            callerVariable->value = finishedFrame.argv[i].value;
+                        }
                     }
                 }
+                fseek(fin, finishedInfo.returnOffset, SEEK_SET);
+                flag = true;
             }
-            fseek(fin, finishedInfo.returnOffset, SEEK_SET);
-            flag = true;
         }
         Snapshot* snapshot = buildSnapshot(callStack);
         timeline.record(snapshot);
+        if (done) break;
         if (!flag) {
             fseek(fin, nextOffset, SEEK_SET);
+
         }
     }
+    
 
     fclose(fin);
 

@@ -1,7 +1,8 @@
-func main
-set x 5
-call square x
+func foo b
+set a 10
+add b a
 func_end
-func square a
-mul a a
+func main
+set k 10
+call foo k
 func_end

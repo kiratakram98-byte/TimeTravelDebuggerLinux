@@ -31,3 +31,8 @@ tested my code with arithmetic operations,two function parameters,separate local
 #11 oct
 changed add/mul/sub/div so now they support add a b c and add a 6 
 ran more test
+#12 oct
+last day,didnt do anything today, not sure if my implementation is correct but i tried as much a i could and ran many tests
+
+#16 oct
+made some final changes
