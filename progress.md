@@ -36,3 +36,6 @@ last day,didnt do anything today, not sure if my implementation is correct but i
 
 #16 oct
 made some final changes
+
+#10 nov
+commiting as much as i have done till deadline trying to get the code but its so hard for me, not possible to do only by myself
