@@ -198,10 +198,8 @@ bool sendError(int sock, const string& message)
 
     uint32_t crc = 0xFFFFFFFF;
 
-    // Include the status byte in the checksum.
     crc = updateCRC32(crc, status);
 
-    // Include every character of the error message.
     for (size_t i = 0; i < message.size(); i++)
     {
         crc = updateCRC32(crc, (unsigned char)message[i]);
@@ -209,19 +207,18 @@ bool sendError(int sock, const string& message)
 
     crc = ~crc;
 
-    // Send status byte.
+   
     if (!sendAll(sock, (const char*)&status, 1))
     {
         return false;
     }
 
-    // Send error message.
     if (!sendAll(sock, message.c_str(), message.size()))
     {
         return false;
     }
 
-    // Convert checksum into 4 little-endian bytes.
+   
     unsigned char checksum[4];
 
     checksum[0] = crc & 0xFF;
@@ -350,13 +347,13 @@ int connectToServerWithWakeup()
         return serverSock;
     }
 
-    // Backend is down. Try to start it.
+   
     if (!startServer(serverPort))
     {
         return -1;
     }
 
-    // Give the backend time to start, retrying the connection.
+    
     for (int i = 0; i < STARTUP_MAX_ATTEMPTS; i++)
     {
         this_thread::sleep_for(chrono::milliseconds(STARTUP_POLL_INTERVAL_MS));
@@ -402,15 +399,14 @@ public:
             }
             else
             {
-                // The oldest byte is definitely not part of the checksum.
+                
                 crc = updateCRC32(crc, lastFour[0]);
 
-                // Shift the remaining bytes.
+              
                 lastFour[0] = lastFour[1];
                 lastFour[1] = lastFour[2];
                 lastFour[2] = lastFour[3];
 
-                // Store the new byte.
                 lastFour[3] = byte;
             }
         }
@@ -450,6 +446,177 @@ public:
         return crc == receivedChecksum;
     }
 };
+bool forwardUpload(int clientSock, int serverSock)
+{
+    char buffer[IO_BUFFER_SIZE];
+    char pending[4];
+    int pendingCount = 0;
+
+    uint32_t crc = 0xFFFFFFFF;
+    bool receivedStatus = false;
+
+    while (true)
+    {
+        int bytes = recv(clientSock, buffer, IO_BUFFER_SIZE, 0);
+
+        if (bytes < 0)
+        {
+            if (errno == EINTR)
+                continue;
+
+            return false;
+        }
+
+        if (bytes == 0)
+            break;
+
+        for (int i = 0; i < bytes; i++)
+        {
+            if (pendingCount < 4)
+            {
+                pending[pendingCount++] = buffer[i];
+            }
+            else
+            {
+                char safeByte = pending[0];
+
+                for (int j = 0; j < 3; j++)
+                    pending[j] = pending[j + 1];
+
+                pending[3] = buffer[i];
+
+                if (!receivedStatus)
+                {
+                    if ((unsigned char)safeByte != 0)
+                        return false;
+
+                    receivedStatus = true;
+                }
+
+                crc = updateCRC32(crc, (unsigned char)safeByte);
+
+                if (!sendAll(serverSock, &safeByte, 1))
+                    return false;
+            }
+        }
+    }
+
+    if (!receivedStatus || pendingCount != 4)
+        return false;
+
+    crc = ~crc;
+
+    uint32_t receivedChecksum =
+        (uint32_t)(unsigned char)pending[0] |
+        ((uint32_t)(unsigned char)pending[1] << 8) |
+        ((uint32_t)(unsigned char)pending[2] << 16) |
+        ((uint32_t)(unsigned char)pending[3] << 24);
+
+    if (crc != receivedChecksum)
+        return false;
+
+  
+    return sendAll(serverSock, pending, 4);
+}
+bool forwardResponse(int serverSock, int clientSock)
+{
+    FILE* temp = tmpfile();
+
+    if (temp == nullptr)
+        return false;
+
+    char buffer[IO_BUFFER_SIZE];
+    char pending[4];
+    int pendingCount = 0;
+
+    uint32_t crc = 0xFFFFFFFF;
+
+    while (true)
+    {
+        int bytes = recv(serverSock, buffer, IO_BUFFER_SIZE, 0);
+
+        if (bytes < 0)
+        {
+            if (errno == EINTR)
+                continue;
+
+            fclose(temp);
+            return false;
+        }
+
+        if (bytes == 0)
+            break;
+
+        for (int i = 0; i < bytes; i++)
+        {
+            if (pendingCount < 4)
+            {
+                pending[pendingCount++] = buffer[i];
+            }
+            else
+            {
+                char safeByte = pending[0];
+
+                for (int j = 0; j < 3; j++)
+                    pending[j] = pending[j + 1];
+
+                pending[3] = buffer[i];
+
+                crc = updateCRC32(crc, (unsigned char)safeByte);
+
+                if (fwrite(&safeByte, 1, 1, temp) != 1)
+                {
+                    fclose(temp);
+                    return false;
+                }
+            }
+        }
+    }
+
+    if (pendingCount != 4)
+    {
+        fclose(temp);
+        return false;
+    }
+
+    crc = ~crc;
+
+    uint32_t receivedChecksum =
+        (uint32_t)(unsigned char)pending[0] |
+        ((uint32_t)(unsigned char)pending[1] << 8) |
+        ((uint32_t)(unsigned char)pending[2] << 16) |
+        ((uint32_t)(unsigned char)pending[3] << 24);
+
+    if (crc != receivedChecksum)
+    {
+        fclose(temp);
+        return false;
+    }
+
+    rewind(temp);
+
+    while (true)
+    {
+        size_t bytes = fread(buffer, 1, IO_BUFFER_SIZE, temp);
+
+        if (bytes == 0)
+            break;
+
+        if (!sendAll(clientSock, buffer, bytes))
+        {
+            fclose(temp);
+            return false;
+        }
+    }
+
+    fclose(temp);
+
+    if (!sendAll(clientSock, (const char*)pending, 4))
+        return false;
+
+    return true;
+}
+
 void relayOneClient(ClientInfo& c)
 {
     // 1. serverSock = connectToServerWithWakeup().
@@ -460,6 +627,43 @@ void relayOneClient(ClientInfo& c)
     // 5. Server -> client: repeat recv() from serverSock and sendAll() to clientSock.
     //    Stop when recv() returns 0 (the server sent its whole reply and closed) or fails.
     // 6. Close both sockets.
+    int clientSock = c.sock;
+
+    int serverSock = connectToServerWithWakeup();
+
+    if (serverSock < 0)
+    {
+        sendError(clientSock, "backend server failed to start");
+        close(clientSock);
+        return;
+    }
+
+    if (!forwardUpload(clientSock, serverSock))
+    {
+        sendError(clientSock, "Upload failed or checksum mismatch");
+
+        close(serverSock);
+        close(clientSock);
+        return;
+    }
+
+  
+    shutdown(serverSock, SHUT_WR);
+
+    
+    if (!forwardResponse(serverSock, clientSock))
+    {
+        sendError(clientSock, "response corrupted");
+    }
+    else
+    {
+       
+        shutdown(clientSock, SHUT_WR);
+    }
+
+    
+    close(serverSock);
+    close(clientSock);
 }
 
 
@@ -478,6 +682,73 @@ void acceptLoop(int listenSock)
     //   Otherwise enqueue the client socket.
     // Never wait for the server here, so new clients are always accepted quickly.
     // If accept() fails, print the error and keep going (do not end the thread).
+    while (flag)
+    {
+        sockaddr_in clientAddress;
+        socklen_t clientLength = sizeof(clientAddress);
+
+        int clientSock = accept(
+            listenSock,
+            (sockaddr*)&clientAddress,
+            &clientLength
+        );
+
+        if (clientSock < 0)
+        {
+            if (errno == EINTR)
+                continue;
+
+            if (!flag)
+                break;
+
+            perror("accept failed");
+            continue;
+        }
+
+    
+        char addressBuffer[INET_ADDRSTRLEN];
+
+        inet_ntop(
+            AF_INET,
+            &clientAddress.sin_addr,
+            addressBuffer,
+            sizeof(addressBuffer)
+        );
+
+        ClientInfo c;
+
+        c.sock = clientSock;
+        c.address = addressBuffer;
+        c.port = ntohs(clientAddress.sin_port);
+        c.arrivedAt = time(nullptr);
+
+        bool queueFull = false;
+
+      
+        {
+            lock_guard<mutex> lock(queueMutex);
+
+            if (pendingClients.size() >= MAX_PENDING_CLIENTS)
+            {
+                queueFull = true;
+            }
+            else
+            {
+                pendingClients.enqueue(c);
+            }
+        }
+
+        if (queueFull)
+        {
+            sendError(clientSock, "server busy, try again later");
+            close(clientSock);
+        }
+        else
+        {
+            cout << "Client queued: "
+                << c.address << ":" << c.port << endl;
+        }
+    }
 }
 void dispatcherLoop()
 {
@@ -485,6 +756,44 @@ void dispatcherLoop()
     // Repeat:
     //   Lock queueMutex, take ONE client out of the queue if there is one, unlock.
     //   If we got a client: call relayOneClient(). The next client is taken out of the queue only after this one is finished.
+    while (flag)
+    {
+        ClientInfo c;
+        bool hasClient = false;
+
+        {
+            lock_guard<mutex> lock(queueMutex);
+
+            if (!pendingClients.isEmpty())
+            {
+                c = pendingClients.dequeue();
+                hasClient = true;
+            }
+        }
+
+        if (hasClient)
+        {
+            double waitingTime = difftime(time(nullptr), c.arrivedAt);
+
+            if (waitingTime > 30)
+            {
+                cout << "Client timed out in queue: "
+                    << c.address << ":" << c.port << endl;
+
+                close(c.sock);
+                continue;
+            }
+
+            cout << "Serving client: "
+                << c.address << ":" << c.port << endl;
+
+            relayOneClient(c);
+        }
+        else
+        {
+            this_thread::sleep_for(chrono::milliseconds(50));
+        }
+    }
 }
 
 void handler(int sg) {
@@ -498,5 +807,52 @@ int main(int argc, char* argv[])
     // 2. listenSock = createListenSocket(LB_PORT).
     // 3. Start a thread that runs acceptLoop(listenSock) and detach it.
     // 4. Call dispatcherLoop().
+
+
+    if (argc != 3)
+    {
+        cout << "Usage: ./load_balancer <server_ip> <server_port>" << endl;
+        return 1;
+    }
+
+    serverHost = argv[1];
+    serverPort = atoi(argv[2]);
+
+    if (serverPort <= 0 || serverPort > 65535)
+    {
+        cout << "Invalid server port!" << endl;
+        return 1;
+    }
+
+   
+    int listenSock = createListenSocket(lbPort);
+
+    cout << "Load Balancer listening on port "
+        << lbPort << endl;
+
+    thread acceptor(acceptLoop, listenSock);
+
+   
+    dispatcherLoop();
+
+    shutdown(listenSock, SHUT_RDWR);
+    close(listenSock);
+
+    acceptor.join();
+
+    
+    {
+        lock_guard<mutex> lock(queueMutex);
+
+        while (!pendingClients.isEmpty())
+        {
+            ClientInfo c = pendingClients.dequeue();
+            close(c.sock);
+        }
+    }
+
+    cout << "\nLoad Balancer stopped." << endl;
+
+
     return 0;
 }
