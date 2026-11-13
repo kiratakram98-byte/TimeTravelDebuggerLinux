@@ -39,5 +39,12 @@ made some final changes
 
 #10 nov
 commiting as much as i have done till deadline trying to get the code but its so hard for me, not possible to do only by myself
+
 #11 oct
 load balancer completed
+
+#12 nov
+implemented half of client.cpp
+
+#13 nov
+implemented next half of client.cpp
